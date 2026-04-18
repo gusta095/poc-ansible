@@ -2,17 +2,17 @@
 - name: Create Resource Groups
   include_role:
     name: azure
-    tasks_from: create_resource_group
+    tasks_from: create_resource_groups
   when: resource_groups is defined
 
 - name: Create Storage Accounts
   include_role:
     name: azure
-    tasks_from: create_storage_account
+    tasks_from: create_storage_accounts
   when: storage_accounts is defined
 
 - name: Create Network Security Groups
   include_role:
     name: azure
-    tasks_from: create_network_security_group
+    tasks_from: create_network_security_groups
   when: network_security_groups is defined

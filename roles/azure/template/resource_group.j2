@@ -2,13 +2,13 @@
   "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "resources": [
-    {%- for item in resource_groups %}
+    {%- for item in resource_data %}
     {
       "type": "Microsoft.Resources/resourceGroups",
       "apiVersion": "2021-04-01",
       "name": "{{ item }}",
-      "location": "{{ resource_groups[item].properties.location }}",
-      "tags": {{ resource_groups[item].properties.tags | default({}) | to_json }}
+      "location": "{{ resource_data[item].properties.location }}",
+      "tags": {{ resource_data[item].properties.tags | default({}) | to_json }}
     }{% if not loop.last %},{% endif %}
 
     {%- endfor %}

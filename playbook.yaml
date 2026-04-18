@@ -1,11 +1,8 @@
 ---
-- name: Deploy infraestrutura Azure
+- name: Deploy infraestrutura orientado a mudanças
   hosts: localhost
   connection: local
   gather_facts: false
-
-  vars_files:
-    - interface.yml
 
   tasks:
     - name: Carregar interface.yml
@@ -20,5 +17,32 @@
       loop_control:
         label: "{{ item.key }}"
 
-  roles:
-    - azure
+    - name: Detectar recursos alterados no git
+      command: git diff --name-only --diff-filter=AM HEAD~1 HEAD -- resources/
+      register: git_diff
+      changed_when: false
+
+    - name: Bootstrap - sem commit anterior, considera tudo alterado
+      command: ls resources/
+      register: all_resources
+      changed_when: false
+      when: git_diff.stdout == ""
+
+    - name: Definir lista de recursos a deployar
+      set_fact:
+        changed_files: >-
+          {{
+            git_diff.stdout_lines
+            if git_diff.stdout != ""
+            else all_resources.stdout_lines | map('regex_replace', '^', 'resources/') | list
+          }}
+
+    - name: Deploy só o que mudou
+      include_role:
+        name: azure
+        tasks_from: "create_{{ item | basename | splitext | first }}"
+      vars:
+        resource_data: "{{ (lookup('file', item) | from_yaml)[item | basename | splitext | first] }}"
+      loop: "{{ changed_files }}"
+      loop_control:
+        label: "{{ item }}"

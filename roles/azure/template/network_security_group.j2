@@ -2,16 +2,16 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "resources": [
-    {%- for item in network_security_groups %}
+    {%- for item in resource_data %}
     {
       "type": "Microsoft.Network/networkSecurityGroups",
       "apiVersion": "2023-05-01",
       "name": "{{ item }}",
-      "location": "{{ network_security_groups[item].properties.location }}",
+      "location": "{{ resource_data[item].properties.location }}",
       "properties": {
         "securityRules": []
       },
-      "tags": {{ network_security_groups[item].properties.tags | default({}) | to_json }}
+      "tags": {{ resource_data[item].properties.tags | default({}) | to_json }}
     }{% if not loop.last %},{% endif %}
 
     {%- endfor %}

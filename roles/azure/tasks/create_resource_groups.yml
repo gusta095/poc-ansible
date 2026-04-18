@@ -7,6 +7,6 @@
 - name: Deploy resource groups
   command: >
     az deployment sub create
-    --location {{ (resource_groups.values() | list | first).properties.location }}
+    --location {{ (resource_data.values() | list | first).properties.location }}
     --template-file /tmp/resource_groups.json
     --name deploy-resource-groups
