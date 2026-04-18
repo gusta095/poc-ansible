@@ -1,28 +1,27 @@
-azure:
-  resource_groups:
-    rg-producao:
-      properties:
-        location: brazilsouth
-        tags:
-          env: production
-          project: poc-ansible
+resource_groups:
+  rg-producao:
+    properties:
+      location: brazilsouth
+      tags:
+        env: production
+        project: poc-ansible
 
-  # storage_accounts:
-  #   stpocansible001:
-  #     properties:
-  #       location: brazilsouth
-  #       resource_group: rg-producao
-  #       sku: Standard_LRS
-  #       kind: StorageV2
-  #       tags:
-  #         env: production
-  #         project: poc-ansible
+storage_accounts:
+  stpocansible001:
+    properties:
+      location: brazilsouth
+      resource_group: rg-producao
+      sku: Standard_LRS
+      kind: StorageV2
+      tags:
+        env: production
+        project: poc-ansible
 
-  network_security_groups:
-    nsg-producao:
-      properties:
-        location: brazilsouth
-        resource_group: rg-producao
-        tags:
-          env: production
-          project: poc-ansible
+network_security_groups:
+  nsg-producao:
+    properties:
+      location: brazilsouth
+      resource_group: rg-producao
+      tags:
+        env: production
+        project: poc-ansible

@@ -7,6 +7,6 @@
 - name: Deploy storage accounts
   command: >
     az deployment group create
-    --resource-group {{ (azure.storage_accounts.values() | list | first).properties.resource_group }}
+    --resource-group {{ (storage_accounts.values() | list | first).properties.resource_group }}
     --template-file /tmp/storage_accounts.json
     --name deploy-storage-accounts

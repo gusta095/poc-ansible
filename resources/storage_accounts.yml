@@ -1,0 +1,10 @@
+storage_accounts:
+  stpocansible001:
+    properties:
+      kind: StorageV2
+      location: brazilsouth
+      resource_group: rg-producao
+      sku: Standard_LRS
+      tags:
+        env: production
+        project: poc-ansible

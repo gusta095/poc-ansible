@@ -7,6 +7,6 @@
 - name: Deploy network security groups
   command: >
     az deployment group create
-    --resource-group {{ (azure.network_security_groups.values() | list | first).properties.resource_group }}
+    --resource-group {{ (network_security_groups.values() | list | first).properties.resource_group }}
     --template-file /tmp/network_security_groups.json
     --name deploy-network-security-groups

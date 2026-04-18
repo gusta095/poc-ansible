@@ -1,0 +1,8 @@
+network_security_groups:
+  nsg-producao:
+    properties:
+      location: brazilsouth
+      resource_group: rg-producao
+      tags:
+        env: production
+        project: poc-ansible

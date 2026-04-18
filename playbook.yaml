@@ -7,5 +7,18 @@
   vars_files:
     - interface.yml
 
+  tasks:
+    - name: Carregar interface.yml
+      set_fact:
+        interface: "{{ lookup('file', 'interface.yml') | from_yaml }}"
+
+    - name: Gerar arquivo por tipo de recurso
+      copy:
+        dest: "resources/{{ item.key }}.yml"
+        content: "{{ { item.key: item.value } | to_nice_yaml(indent=2) }}"
+      loop: "{{ interface | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
   roles:
     - azure
