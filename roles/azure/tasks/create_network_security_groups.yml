@@ -5,8 +5,9 @@
     dest: /tmp/network_security_groups.json
 
 - name: Deploy network security groups
-  command: >
-    az deployment group create
-    --resource-group {{ (resource_data.values() | list | first).properties.resource_group }}
-    --template-file /tmp/network_security_groups.json
-    --name deploy-network-security-groups
+  azure_rm_deployment:
+    resource_group: "{{ (resource_data.values() | list | first).properties.resource_group }}"
+    location: "{{ (resource_data.values() | list | first).properties.location }}"
+    name: deploy-network-security-groups
+    state: present
+    template: "{{ lookup('file', '/tmp/network_security_groups.json') | from_json }}"
