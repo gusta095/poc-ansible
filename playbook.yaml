@@ -1,0 +1,11 @@
+---
+- name: Deploy infraestrutura Azure
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - interface.yml
+
+  roles:
+    - azure

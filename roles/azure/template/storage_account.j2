@@ -1,0 +1,20 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "resources": [
+    {%- for item in azure.storage_accounts %}
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-01-01",
+      "name": "{{ item }}",
+      "location": "{{ azure.storage_accounts[item].properties.location }}",
+      "sku": {
+        "name": "{{ azure.storage_accounts[item].properties.sku | default('Standard_LRS') }}"
+      },
+      "kind": "{{ azure.storage_accounts[item].properties.kind | default('StorageV2') }}",
+      "tags": {{ azure.storage_accounts[item].properties.tags | default({}) | to_json }}
+    }{% if not loop.last %},{% endif %}
+
+    {%- endfor %}
+  ]
+}

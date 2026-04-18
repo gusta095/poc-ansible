@@ -1,0 +1,12 @@
+---
+- name: Gerar ARM template - storage accounts
+  template:
+    src: "{{ role_path }}/template/storage_account.j2"
+    dest: /tmp/storage_accounts.json
+
+- name: Deploy storage accounts
+  command: >
+    az deployment group create
+    --resource-group {{ (azure.storage_accounts.values() | list | first).properties.resource_group }}
+    --template-file /tmp/storage_accounts.json
+    --name deploy-storage-accounts

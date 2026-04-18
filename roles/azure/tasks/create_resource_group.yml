@@ -1,0 +1,12 @@
+---
+- name: Gerar ARM template - resource groups
+  template:
+    src: "{{ role_path }}/template/resource_group.j2"
+    dest: /tmp/resource_groups.json
+
+- name: Deploy resource groups
+  command: >
+    az deployment sub create
+    --location {{ (azure.resource_groups.values() | list | first).properties.location }}
+    --template-file /tmp/resource_groups.json
+    --name deploy-resource-groups
