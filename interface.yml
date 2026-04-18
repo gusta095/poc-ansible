@@ -23,5 +23,5 @@ network_security_groups:
       location: brazilsouth
       resource_group: rg-producao
       tags:
-        env: production
+        env: test
         project: poc-ansible

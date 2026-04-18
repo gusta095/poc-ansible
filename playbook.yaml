@@ -9,40 +9,32 @@
       set_fact:
         interface: "{{ lookup('file', 'interface.yml') | from_yaml }}"
 
-    - name: Gerar arquivo por tipo de recurso
-      copy:
-        dest: "resources/{{ item.key }}.yml"
-        content: "{{ { item.key: item.value } | to_nice_yaml(indent=2) }}"
-      loop: "{{ interface | dict2items }}"
-      loop_control:
-        label: "{{ item.key }}"
-
-    - name: Detectar recursos alterados no git
-      command: git diff --name-only --diff-filter=AM HEAD~1 HEAD -- resources/
-      register: git_diff
+    - name: Obter versão anterior do interface.yml
+      command: git show HEAD~1:interface.yml
+      register: prev_interface
+      failed_when: false
       changed_when: false
 
-    - name: Bootstrap - sem commit anterior, considera tudo alterado
-      command: ls resources/
-      register: all_resources
-      changed_when: false
-      when: git_diff.stdout == ""
-
-    - name: Definir lista de recursos a deployar
+    - name: Definir recursos alterados
+      vars:
+        prev: "{{ prev_interface.stdout | from_yaml if prev_interface.rc == 0 else {} }}"
       set_fact:
-        changed_files: >-
-          {{
-            git_diff.stdout_lines
-            if git_diff.stdout != ""
-            else all_resources.stdout_lines | map('regex_replace', '^', 'resources/') | list
-          }}
+        changed_resources: >-
+          {%- set changed = [] -%}
+          {%- for key in interface.keys() -%}
+            {%- if prev.get(key) != interface[key] -%}
+              {%- set _ = changed.append(key) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ changed }}
 
     - name: Deploy só o que mudou
       include_role:
         name: azure
-        tasks_from: "create_{{ item | basename | splitext | first }}"
+        tasks_from: "create_{{ resource_type }}"
       vars:
-        resource_data: "{{ (lookup('file', item) | from_yaml)[item | basename | splitext | first] }}"
-      loop: "{{ changed_files }}"
+        resource_data: "{{ interface[resource_type] }}"
+      loop: "{{ changed_resources }}"
       loop_control:
-        label: "{{ item }}"
+        loop_var: resource_type
+        label: "{{ resource_type }}"
