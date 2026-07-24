@@ -5,6 +5,57 @@
   gather_facts: false
 
   tasks:
+    # ── 1. Sincronizar resources/ com o interface.yml (fonte da verdade) ──
+    # interface.yml é o que o usuário declara; resources/ é só um artefato
+    # derivado, um arquivo por instância, pra dar granularidade ao git diff.
+    - name: Carregar interface.yml
+      set_fact:
+        interface: "{{ lookup('file', 'interface.yml') | from_yaml }}"
+
+    - name: Montar lista de instâncias (tipo + chave) declaradas no interface.yml
+      set_fact:
+        instances: >-
+          {%- set result = [] -%}
+          {%- for tipo in interface.keys() -%}
+            {%- for chave in interface[tipo].keys() -%}
+              {%- set _ = result.append({'tipo': tipo, 'chave': chave}) -%}
+            {%- endfor -%}
+          {%- endfor -%}
+          {{ result }}
+
+    - name: Escrever um arquivo por instância em resources/
+      copy:
+        dest: "resources/{{ item.tipo }}_{{ item.chave }}.yml"
+        content: "{{ {item.chave: interface[item.tipo][item.chave]} | to_nice_yaml }}"
+      loop: "{{ instances }}"
+      loop_control:
+        label: "{{ item.tipo }}_{{ item.chave }}"
+
+    - name: Calcular nomes de arquivo esperados
+      set_fact:
+        expected_basenames: >-
+          {%- set result = [] -%}
+          {%- for i in instances -%}
+            {%- set _ = result.append(i.tipo ~ '_' ~ i.chave ~ '.yml') -%}
+          {%- endfor -%}
+          {{ result }}
+
+    - name: Listar arquivos existentes em resources/
+      find:
+        paths: resources/
+        patterns: "*.yml"
+      register: existing_files
+
+    - name: Remover arquivos órfãos (instância saiu do interface.yml)
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ existing_files.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: (item.path | basename) not in expected_basenames
+
+    # ── 2. Detectar o que mudou em resources/ ──
     # Uso local/dev: compara o working tree com o último commit (HEAD),
     # então também pega mudanças ainda não commitadas.
     #
@@ -28,6 +79,7 @@
         changed_files: "{{ git_status.stdout_lines | reject('match', '^.?D') | map('regex_replace', '^.{3}', '') | list }}"
         removed_files: "{{ git_status.stdout_lines | select('match', '^.?D') | map('regex_replace', '^.{3}', '') | list }}"
 
+    # ── 3. Deploy das instâncias alteradas/novas ──
     # resource_type = nome do arquivo sem o sufixo "_chave"
     #   ex: storage_accounts_stpocansible001.yml -> storage_accounts
     #   usado para escolher a task create_{{resource_type}}.yml no role azure
@@ -43,6 +95,7 @@
       loop_control:
         label: "{{ item }}"
 
+    # ── 4. Destroy das instâncias removidas ──
     # O arquivo já não existe no working tree, então o conteúdo vem do
     # último commit (`git show HEAD:path`) em vez de lookup('file', ...).
     # stack_state: absent é repassado pro role, que usa como `state` no
