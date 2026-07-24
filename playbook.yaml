@@ -1,40 +1,55 @@
 ---
-- name: Deploy infraestrutura orientado a mudanças
+- name: Deploy infraestrutura orientado a mudanças (por instância)
   hosts: localhost
   connection: local
   gather_facts: false
 
   tasks:
-    - name: Carregar interface.yml
-      set_fact:
-        interface: "{{ lookup('file', 'interface.yml') | from_yaml }}"
-
-    - name: Obter versão anterior do interface.yml
-      command: git show HEAD~1:interface.yml
-      register: prev_interface
-      failed_when: false
+    - name: Detectar mudanças em resources/ (working tree vs HEAD)
+      command: git status --porcelain --untracked-files=all -- resources/
+      register: git_status
       changed_when: false
 
-    - name: Definir recursos alterados
-      vars:
-        prev: "{{ prev_interface.stdout | from_yaml if prev_interface.rc == 0 else {} }}"
+    - name: Separar arquivos alterados/novos dos removidos
       set_fact:
-        changed_resources: >-
-          {%- set changed = [] -%}
-          {%- for key in interface.keys() -%}
-            {%- if prev.get(key) != interface[key] -%}
-              {%- set _ = changed.append(key) -%}
+        changed_files: >-
+          {%- set result = [] -%}
+          {%- for line in git_status.stdout_lines -%}
+            {%- if line[0:2] not in [' D', 'D ', 'D'] -%}
+              {%- set _ = result.append(line[3:]) -%}
             {%- endif -%}
           {%- endfor -%}
-          {{ changed }}
+          {{ result }}
+        removed_files: >-
+          {%- set result = [] -%}
+          {%- for line in git_status.stdout_lines -%}
+            {%- if line[0:2] in [' D', 'D ', 'D'] -%}
+              {%- set _ = result.append(line[3:]) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ result }}
 
-    - name: Deploy só o que mudou
+    - name: Deploy das instâncias alteradas/novas
       include_role:
         name: azure
         tasks_from: "create_{{ resource_type }}"
       vars:
-        resource_data: "{{ interface[resource_type] }}"
-      loop: "{{ changed_resources }}"
+        resource_data: "{{ lookup('file', item) | from_yaml }}"
+        resource_type: "{{ (item | basename | splitext)[0] | regex_replace('_[^_]+$', '') }}"
+        deployment_name: "{{ (item | basename | splitext)[0] | replace('_', '-') }}"
+      loop: "{{ changed_files }}"
       loop_control:
-        loop_var: resource_type
-        label: "{{ resource_type }}"
+        label: "{{ item }}"
+
+    - name: Destroy das instâncias removidas
+      include_role:
+        name: azure
+        tasks_from: "create_{{ resource_type }}"
+      vars:
+        resource_data: "{{ lookup('pipe', 'git show HEAD:' ~ item) | from_yaml }}"
+        resource_type: "{{ (item | basename | splitext)[0] | regex_replace('_[^_]+$', '') }}"
+        deployment_name: "{{ (item | basename | splitext)[0] | replace('_', '-') }}"
+        stack_state: absent
+      loop: "{{ removed_files }}"
+      loop_control:
+        label: "{{ item }}"

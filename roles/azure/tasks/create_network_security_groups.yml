@@ -2,12 +2,12 @@
 - name: Gerar ARM template - network security groups
   template:
     src: "{{ role_path }}/template/network_security_group.j2"
-    dest: /tmp/network_security_groups.json
+    dest: "/tmp/{{ deployment_name }}.json"
 
 - name: Deploy network security groups
   azure_rm_deployment:
     resource_group: "{{ (resource_data.values() | list | first).properties.resource_group }}"
     location: "{{ (resource_data.values() | list | first).properties.location }}"
-    name: deploy-network-security-groups
-    state: present
-    template: "{{ lookup('file', '/tmp/network_security_groups.json') | from_json }}"
+    name: "{{ deployment_name }}"
+    state: "{{ stack_state | default('present') }}"
+    template: "{{ lookup('file', '/tmp/' ~ deployment_name ~ '.json') | from_json }}"

@@ -1,6 +1,6 @@
 # poc-ansible
 
-POC de deploy de infraestrutura AWS orientado a mudanças, usando Ansible + CloudFormation + Jinja2.
+POC de deploy de infraestrutura Azure orientado a mudanças, usando Ansible + ARM Templates + Jinja2.
 
 ---
 

@@ -2,12 +2,12 @@
 - name: Gerar ARM template - storage accounts
   template:
     src: "{{ role_path }}/template/storage_account.j2"
-    dest: /tmp/storage_accounts.json
+    dest: "/tmp/{{ deployment_name }}.json"
 
 - name: Deploy storage accounts
   azure_rm_deployment:
     resource_group: "{{ (resource_data.values() | list | first).properties.resource_group }}"
     location: "{{ (resource_data.values() | list | first).properties.location }}"
-    name: deploy-storage-accounts
-    state: present
-    template: "{{ lookup('file', '/tmp/storage_accounts.json') | from_json }}"
+    name: "{{ deployment_name }}"
+    state: "{{ stack_state | default('present') }}"
+    template: "{{ lookup('file', '/tmp/' ~ deployment_name ~ '.json') | from_json }}"

@@ -4,7 +4,7 @@
     name: "{{ rg_item.key }}"
     location: "{{ rg_item.value.properties.location }}"
     tags: "{{ rg_item.value.properties.tags | default({}) }}"
-    state: present
+    state: "{{ stack_state | default('present') }}"
   loop: "{{ resource_data | dict2items }}"
   loop_control:
     loop_var: rg_item

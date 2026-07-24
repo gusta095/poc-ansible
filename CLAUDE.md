@@ -4,17 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## O que é este projeto
 
-POC em desenvolvimento. O objetivo é um sistema de deploy de infraestrutura AWS **orientado a mudanças**: só aplica os recursos que foram modificados no git, em vez de redeployar tudo a cada execução.
+POC em desenvolvimento. O objetivo é um sistema de deploy de infraestrutura **Azure** (via ARM Templates) **orientado a mudanças**: só aplica os recursos que foram modificados no git, em vez de redeployar tudo a cada execução.
 
-Este repositório ainda não tem código implementado — apenas a arquitetura está definida. O ponto de partida para implementação está abaixo.
+A role `roles/azure/` já tem uma primeira implementação (resource groups, storage accounts, network security groups), mas hoje ela agrupa todas as instâncias de um tipo num único deployment ARM. O trabalho em andamento é migrar esse padrão para a granularidade por instância descrita abaixo.
 
 ---
 
 ## O que implementar primeiro
 
-1. **`split_interface.yaml`** — playbook Ansible que lê `interface.yml` e gera um arquivo por instância de recurso em `resources/`. Basear no `../public-code/interface-modular/playbook.yaml`, que já faz o split por chave de topo.
+1. **`split_interface.yaml`** — playbook Ansible que lê `interface.yml` e gera um arquivo por instância de recurso em `resources/`. Basear no `../public-code/interface-modular/playbook.yaml`, que já faz o split por chave de topo (a lógica de split independe de cloud provider).
 
-2. **`modules/api_gateway/`** — primeiro módulo a implementar. Adaptar o template Jinja2 de `../public-code/develop-local/create_api_gateway.j2` e o playbook de `../public-code/develop-local/playbook.yaml`, ajustando para receber `resource_file` como variável extra (`-e`) e derivar o `stack_name` do nome do arquivo.
+2. **`modules/{resource_groups,storage_accounts,network_security_groups}/`** — migrar as tasks e templates hoje em `roles/azure/tasks/` e `roles/azure/template/` para módulos independentes, um deployment ARM por instância. Cada módulo recebe `resource_file` como variável extra (`-e`) e deriva o `deployment_name` do nome do arquivo.
 
 ---
 
@@ -27,24 +27,24 @@ resources/{tipo}_{chave}.yml      ← um arquivo por instância, versionado no g
     ↓ git diff no pipeline
 modules/{tipo}/playbook.yaml      ← executado só para os arquivos que mudaram
     ↓
-stack CFN independente por instância
+deployment ARM independente por instância (resource group + azure_rm_deployment)
 ```
 
-**Princípio:** granularidade por instância, não por tipo. `api_gateway_gateway1.yml` e `api_gateway_gateway2.yml` são stacks CFN separados. Mudar um não toca o outro.
+**Princípio:** granularidade por instância, não por tipo. `storage_accounts_stpocansible001.yml` e `storage_accounts_stpocansible002.yml` são deployments ARM separados. Mudar um não toca o outro.
 
 ---
 
 ## Convenções
 
-**Nomes de arquivo em `resources/`:** `{tipo}_{chave}.yml` — ex: `api_gateway_gateway1.yml`
+**Nomes de arquivo em `resources/`:** `{tipo}_{chave}.yml` — ex: `storage_accounts_stpocansible001.yml`
 
-**Stack CFN:** mesmo nome com underscores trocados por hífens — ex: `api-gateway-gateway1`
+**Deployment ARM:** mesmo nome com underscores trocados por hífens — ex: `storage-accounts-stpocansible001`
 
 **Derivar tipo do arquivo no shell:**
 ```bash
-filename=$(basename "$file" .yml)                        # api_gateway_gateway1
-resource_type=$(echo "$filename" | sed 's/_[^_]*$//')   # api_gateway
-stack_name=$(echo "$filename" | tr '_' '-')             # api-gateway-gateway1
+filename=$(basename "$file" .yml)                        # storage_accounts_stpocansible001
+resource_type=$(echo "$filename" | sed 's/_[^_]*$//')   # storage_accounts
+deployment_name=$(echo "$filename" | tr '_' '-')        # storage-accounts-stpocansible001
 ```
 
 ---
@@ -72,20 +72,23 @@ Cada módulo deve aceitar `stack_state=absent` para o caso de destroy.
 
 ```yaml
 vars:
-  stack_name: "{{ (resource_file | basename | splitext)[0] | replace('_', '-') }}"
+  deployment_name: "{{ (resource_file | basename | splitext)[0] | replace('_', '-') }}"
 
 tasks:
   - set_fact:
       resource: "{{ lookup('file', resource_file) | from_yaml }}"
   - template:
       src: template.j2
-      dest: "/tmp/{{ stack_name }}.json"
-  - amazon.aws.cloudformation:
-      stack_name: "{{ stack_name }}"
+      dest: "/tmp/{{ deployment_name }}.json"
+  - azure.azcollection.azure_rm_deployment:
+      resource_group: "{{ (resource.values() | list | first).properties.resource_group }}"
+      location: "{{ (resource.values() | list | first).properties.location }}"
+      name: "{{ deployment_name }}"
       state: "{{ stack_state | default('present') }}"
-      region: us-east-1
-      template: "/tmp/{{ stack_name }}.json"
+      template: "{{ lookup('file', '/tmp/' ~ deployment_name ~ '.json') | from_json }}"
 ```
+
+Resource groups são caso especial: não usam ARM template, usam o módulo nativo `azure_rm_resourcegroup` diretamente (ver `roles/azure/tasks/create_resource_groups.yml`).
 
 ---
 
@@ -93,7 +96,5 @@ tasks:
 
 | O quê | Onde |
 |---|---|
-| Template Jinja2 de API Gateway (referência) | `../public-code/develop-local/create_api_gateway.j2` |
-| Playbook de deploy atual (referência) | `../public-code/develop-local/playbook.yaml` |
-| Split de interface.yml (referência) | `../public-code/interface-modular/playbook.yaml` |
-| Templates CFN prontos | `../public-code/cfn/api-gateway/` |
+| Implementação atual (base a migrar) | `roles/azure/tasks/`, `roles/azure/template/` |
+| Split de interface.yml (referência, agnóstico de cloud) | `../public-code/interface-modular/playbook.yaml` |
