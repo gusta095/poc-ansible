@@ -12,77 +12,57 @@ A role `roles/azure/` já tem uma primeira implementação (resource groups, sto
 
 ## O que implementar primeiro
 
-1. **`split_interface.yaml`** — playbook Ansible que lê `interface.yml` e gera um arquivo por instância de recurso em `resources/`. Basear no `../public-code/interface-modular/playbook.yaml`, que já faz o split por chave de topo (a lógica de split independe de cloud provider).
-
-2. **`modules/{resource_groups,storage_accounts,network_security_groups}/`** — migrar as tasks e templates hoje em `roles/azure/tasks/` e `roles/azure/template/` para módulos independentes, um deployment ARM por instância. Cada módulo recebe `resource_file` como variável extra (`-e`) e deriva o `deployment_name` do nome do arquivo.
+1. **`modules/{resource_groups,storage_accounts,network_security_groups}/`** — migrar as tasks e templates hoje em `roles/azure/tasks/` e `roles/azure/template/` para módulos independentes, um deployment ARM por instância. Ver "Como o pipeline detecta mudanças" abaixo pra saber que variáveis cada módulo recebe hoje.
 
 ---
 
 ## Arquitetura
 
 ```
-interface.yml
-    ↓ split_interface.yaml
-resources/{tipo}_{chave}.yml      ← um arquivo por instância, versionado no git
-    ↓ git diff no pipeline
-modules/{tipo}/playbook.yaml      ← executado só para os arquivos que mudaram
+interface.yml (working tree)   ← fonte da verdade, único arquivo de entrada
+    ↓ comparado contra
+interface.yml (HEAD)           ← lookup('pipe', 'git show HEAD:interface.yml')
+    ↓ diff estrutural (por tipo + chave, não por linha de texto)
+lista de instâncias alteradas/novas/removidas
     ↓
 deployment ARM independente por instância (resource group + azure_rm_deployment)
 ```
 
-**Princípio:** granularidade por instância, não por tipo. `storage_accounts_stpocansible001.yml` e `storage_accounts_stpocansible002.yml` são deployments ARM separados. Mudar um não toca o outro.
+**Não existe mais split em `resources/`.** Uma tentativa anterior gerava um arquivo por instância em `resources/{tipo}_{chave}.yml` pra dar granularidade ao `git diff`. Foi abandonada — arquivo extra pra manter e commitar depois de cada deploy, sem ganho real. Hoje o `playbook.yaml` compara duas versões do `interface.yml` (working tree vs HEAD) como estrutura de dados (dicts, via `from_yaml`), não como texto — então não precisa de arquivo por instância pra saber o que mudou.
+
+**Princípio:** granularidade por instância, não por tipo. Mudar `storage_accounts.stpocansible001` não deve tocar `storage_accounts.stpocansible002` — cada instância (`tipo` + `chave` do `interface.yml`) vira um deployment ARM separado.
 
 ---
 
-## Convenções
+## Como o pipeline detecta mudanças (hoje, local/dev)
 
-**Nomes de arquivo em `resources/`:** `{tipo}_{chave}.yml` — ex: `storage_accounts_stpocansible001.yml`
+Implementado em `playbook.yaml`:
 
-**Deployment ARM:** mesmo nome com underscores trocados por hífens — ex: `storage-accounts-stpocansible001`
+1. Carrega `interface.yml` do working tree (`interface_atual`) e do HEAD via `git show HEAD:interface.yml` (`interface_head`) — vazio se o arquivo ainda não existia no HEAD (bootstrap).
+2. Monta a lista de instâncias (`{tipo, chave}`) de cada versão.
+3. `changed_instances` = instâncias que estão no atual e (não existiam no HEAD OU o conteúdo mudou). `removed_instances` = instâncias que existiam no HEAD e sumiram do atual.
+4. Deploy roda em `changed_instances` com `resource_data` = `{chave: interface_atual[tipo][chave]}`; destroy roda em `removed_instances` com `resource_data` vindo de `interface_head` e `stack_state: absent`.
 
-**Derivar tipo do arquivo no shell:**
-```bash
-filename=$(basename "$file" .yml)                        # storage_accounts_stpocansible001
-resource_type=$(echo "$filename" | sed 's/_[^_]*$//')   # storage_accounts
-deployment_name=$(echo "$filename" | tr '_' '-')        # storage-accounts-stpocansible001
-```
+**Isso é a versão local/dev** — compara working tree vs HEAD, então pega mudança não commitada. **Ainda não existe pipeline de CI neste lab.** Quando existir, a comparação deve trocar pra `HEAD~1` vs `HEAD` (dois commits, não working tree vs HEAD) — ver `ideia-de-cicd.md`. A lógica de diff estrutural (por tipo + chave) continua a mesma, só muda de onde vem cada versão do `interface.yml`.
 
----
+Cada módulo/role deve aceitar `stack_state=absent` para o caso de destroy.
 
-## Como o pipeline detecta mudanças
-
-```bash
-# Apply (adicionados ou modificados)
-git diff --name-only --diff-filter=AM HEAD~1 HEAD -- resources/
-
-# Destroy (deletados)
-git diff --name-only --diff-filter=D HEAD~1 HEAD -- resources/
-
-# Bootstrap (sem commit anterior)
-if ! git rev-parse HEAD~1 >/dev/null 2>&1; then
-  ls resources/*.yml > changed_files.txt
-fi
-```
-
-Cada módulo deve aceitar `stack_state=absent` para o caso de destroy.
+**Deployment ARM:** nome = `{tipo}_{chave}` com underscores trocados por hífens — ex: `storage-accounts-stpocansible001`.
 
 ---
 
-## Padrão de playbook por módulo
+## Padrão de playbook/task por módulo (tipo de recurso)
+
+`playbook.yaml` chama cada módulo via `include_role: tasks_from: create_{{tipo}}`, passando `resource_data` (`{chave: {...}}`, um único item) e `deployment_name` já prontos — o módulo não lê arquivo nenhum, só usa o que recebeu:
 
 ```yaml
-vars:
-  deployment_name: "{{ (resource_file | basename | splitext)[0] | replace('_', '-') }}"
-
 tasks:
-  - set_fact:
-      resource: "{{ lookup('file', resource_file) | from_yaml }}"
   - template:
       src: template.j2
       dest: "/tmp/{{ deployment_name }}.json"
   - azure.azcollection.azure_rm_deployment:
-      resource_group: "{{ (resource.values() | list | first).properties.resource_group }}"
-      location: "{{ (resource.values() | list | first).properties.location }}"
+      resource_group: "{{ (resource_data.values() | list | first).properties.resource_group }}"
+      location: "{{ (resource_data.values() | list | first).properties.location }}"
       name: "{{ deployment_name }}"
       state: "{{ stack_state | default('present') }}"
       template: "{{ lookup('file', '/tmp/' ~ deployment_name ~ '.json') | from_json }}"
@@ -96,5 +76,5 @@ Resource groups são caso especial: não usam ARM template, usam o módulo nativ
 
 | O quê | Onde |
 |---|---|
-| Implementação atual (base a migrar) | `roles/azure/tasks/`, `roles/azure/template/` |
-| Split de interface.yml (referência, agnóstico de cloud) | `../public-code/interface-modular/playbook.yaml` |
+| Implementação atual (base a migrar pra `modules/`) | `roles/azure/tasks/`, `roles/azure/template/` |
+| Notas de CI (rascunho, não implementado) | `ideia-de-cicd.md` |

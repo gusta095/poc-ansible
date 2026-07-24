@@ -1,7 +1,0 @@
-nsg-producao:
-    properties:
-        location: brazilsouth
-        resource_group: rg-producao
-        tags:
-            env: test
-            project: poc-ansible

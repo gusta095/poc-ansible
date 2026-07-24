@@ -5,110 +5,95 @@
   gather_facts: false
 
   tasks:
-    # ── 1. Sincronizar resources/ com o interface.yml (fonte da verdade) ──
-    # interface.yml é o que o usuário declara; resources/ é só um artefato
-    # derivado, um arquivo por instância, pra dar granularidade ao git diff.
-    - name: Carregar interface.yml
+    # ── 1. Carregar as duas versões do interface.yml ──
+    # interface_atual = working tree (o que está declarado agora)
+    # interface_head  = a última versão commitada (baseline pra comparar)
+    - name: Carregar interface.yml (working tree)
       set_fact:
-        interface: "{{ lookup('file', 'interface.yml') | from_yaml }}"
+        interface_atual: "{{ lookup('file', 'interface.yml') | from_yaml }}"
 
-    - name: Montar lista de instâncias (tipo + chave) declaradas no interface.yml
+    - name: Carregar interface.yml (HEAD)
+      command: git show HEAD:interface.yml
+      register: interface_head_raw
+      changed_when: false
+      failed_when: false
+
+    # rc != 0 quando o interface.yml ainda não existia no HEAD (primeiro
+    # commit) — trata como vazio, ou seja, tudo em interface_atual é novo.
+    - name: Parsear interface.yml (HEAD)
       set_fact:
-        instances: >-
+        interface_head: "{{ (interface_head_raw.stdout | from_yaml) if interface_head_raw.rc == 0 else {} }}"
+
+    # ── 2. Listar instâncias (tipo + chave) de cada versão ──
+    - name: Montar instâncias do interface atual
+      set_fact:
+        instances_atual: >-
           {%- set result = [] -%}
-          {%- for tipo in interface.keys() -%}
-            {%- for chave in interface[tipo].keys() -%}
+          {%- for tipo in interface_atual.keys() -%}
+            {%- for chave in interface_atual[tipo].keys() -%}
               {%- set _ = result.append({'tipo': tipo, 'chave': chave}) -%}
             {%- endfor -%}
           {%- endfor -%}
           {{ result }}
 
-    - name: Escrever um arquivo por instância em resources/
-      copy:
-        dest: "resources/{{ item.tipo }}_{{ item.chave }}.yml"
-        content: "{{ {item.chave: interface[item.tipo][item.chave]} | to_nice_yaml }}"
-      loop: "{{ instances }}"
-      loop_control:
-        label: "{{ item.tipo }}_{{ item.chave }}"
-
-    - name: Calcular nomes de arquivo esperados
+    - name: Montar instâncias do interface no HEAD
       set_fact:
-        expected_basenames: >-
+        instances_head: >-
           {%- set result = [] -%}
-          {%- for i in instances -%}
-            {%- set _ = result.append(i.tipo ~ '_' ~ i.chave ~ '.yml') -%}
+          {%- for tipo in interface_head.keys() -%}
+            {%- for chave in interface_head[tipo].keys() -%}
+              {%- set _ = result.append({'tipo': tipo, 'chave': chave}) -%}
+            {%- endfor -%}
           {%- endfor -%}
           {{ result }}
 
-    - name: Listar arquivos existentes em resources/
-      find:
-        paths: resources/
-        patterns: "*.yml"
-      register: existing_files
-
-    - name: Remover arquivos órfãos (instância saiu do interface.yml)
-      file:
-        path: "{{ item.path }}"
-        state: absent
-      loop: "{{ existing_files.files }}"
-      loop_control:
-        label: "{{ item.path | basename }}"
-      when: (item.path | basename) not in expected_basenames
-
-    # ── 2. Detectar o que mudou em resources/ ──
-    # Uso local/dev: compara o working tree com o último commit (HEAD),
-    # então também pega mudanças ainda não commitadas.
-    #
-    # Ainda não existe pipeline de CI neste lab. Quando existir, a lógica
-    # muda pra `git diff HEAD~1 HEAD` (commit vs commit)
-    - name: Detectar mudanças em resources/ (working tree vs HEAD)
-      command: git status --porcelain --untracked-files=all -- resources/
-      register: git_status
-      changed_when: false
-
-    # Formato de cada linha do `git status --porcelain`: "XY caminho"
-    #   X = status no index, Y = status no working tree
-    #   exemplos: " M" (modificado), "??" (novo), " D" (deletado)
-    #
-    # changed_files = linhas sem "D" em X ou Y (adicionado/modificado)
-    # removed_files = linhas com "D" em X ou Y (deletado)
-    #
-    # regex_replace('^.{3}', '') descarta "XY " e deixa só o caminho
-    - name: Separar arquivos alterados/novos dos removidos
+    # ── 3. Comparar as duas versões pra achar o que mudou/sumiu ──
+    # changed_instances = está no atual e (não existia no HEAD OU o
+    # conteúdo é diferente do HEAD)
+    # removed_instances = existia no HEAD e não está mais no atual
+    - name: Separar instâncias alteradas/novas das removidas
       set_fact:
-        changed_files: "{{ git_status.stdout_lines | reject('match', '^.?D') | map('regex_replace', '^.{3}', '') | list }}"
-        removed_files: "{{ git_status.stdout_lines | select('match', '^.?D') | map('regex_replace', '^.{3}', '') | list }}"
+        changed_instances: >-
+          {%- set result = [] -%}
+          {%- for i in instances_atual -%}
+            {%- if i not in instances_head or interface_atual[i.tipo][i.chave] != interface_head[i.tipo][i.chave] -%}
+              {%- set _ = result.append(i) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ result }}
+        removed_instances: >-
+          {%- set result = [] -%}
+          {%- for i in instances_head -%}
+            {%- if i not in instances_atual -%}
+              {%- set _ = result.append(i) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ result }}
 
-    # ── 3. Deploy das instâncias alteradas/novas ──
-    # resource_type = nome do arquivo sem o sufixo "_chave"
-    #   ex: storage_accounts_stpocansible001.yml -> storage_accounts
-    #   usado para escolher a task create_{{resource_type}}.yml no role azure
+    # ── 4. Deploy das instâncias alteradas/novas ──
     - name: Deploy das instâncias alteradas/novas
       include_role:
         name: azure
-        tasks_from: "create_{{ resource_type }}"
+        tasks_from: "create_{{ item.tipo }}"
       vars:
-        resource_data: "{{ lookup('file', item) | from_yaml }}"
-        resource_type: "{{ (item | basename | splitext)[0] | regex_replace('_[^_]+$', '') }}"
-        deployment_name: "{{ (item | basename | splitext)[0] | replace('_', '-') }}"
-      loop: "{{ changed_files }}"
+        resource_data: "{{ {item.chave: interface_atual[item.tipo][item.chave]} }}"
+        deployment_name: "{{ (item.tipo ~ '_' ~ item.chave) | replace('_', '-') }}"
+      loop: "{{ changed_instances }}"
       loop_control:
-        label: "{{ item }}"
+        label: "{{ item.tipo }}_{{ item.chave }}"
 
-    # ── 4. Destroy das instâncias removidas ──
-    # O arquivo já não existe no working tree, então o conteúdo vem do
-    # último commit (`git show HEAD:path`) em vez de lookup('file', ...).
-    # stack_state: absent é repassado pro role, que usa como `state` no
-    # azure_rm_resourcegroup/azure_rm_deployment pra destruir o recurso.
+    # ── 5. Destroy das instâncias removidas ──
+    # resource_data vem do interface_head (o conteúdo já não existe no
+    # atual). stack_state: absent vira `state: absent` no role, que
+    # destrói o recurso na Azure.
     - name: Destroy das instâncias removidas
       include_role:
         name: azure
-        tasks_from: "create_{{ resource_type }}"
+        tasks_from: "create_{{ item.tipo }}"
       vars:
-        resource_data: "{{ lookup('pipe', 'git show HEAD:' ~ item) | from_yaml }}"
-        resource_type: "{{ (item | basename | splitext)[0] | regex_replace('_[^_]+$', '') }}"
-        deployment_name: "{{ (item | basename | splitext)[0] | replace('_', '-') }}"
+        resource_data: "{{ {item.chave: interface_head[item.tipo][item.chave]} }}"
+        deployment_name: "{{ (item.tipo ~ '_' ~ item.chave) | replace('_', '-') }}"
         stack_state: absent
-      loop: "{{ removed_files }}"
+      loop: "{{ removed_instances }}"
       loop_control:
-        label: "{{ item }}"
+        label: "{{ item.tipo }}_{{ item.chave }}"
