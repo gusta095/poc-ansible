@@ -11,6 +11,12 @@ resource_groups:
       tags:
         env: production
         project: poc-ansible
+  rg-producao-3:
+    properties:
+      location: brazilsouth
+      tags:
+        env: production
+        project: poc-ansible
 
 storage_accounts:
   stpocansible001:
