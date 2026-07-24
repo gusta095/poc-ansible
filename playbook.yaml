@@ -5,30 +5,29 @@
   gather_facts: false
 
   tasks:
+    # Compara working tree vs HEAD. Pipeline de CI usa
+    # `git diff HEAD~1 HEAD` (commit vs commit) — ver ideia-de-cicd.md.
     - name: Detectar mudanças em resources/ (working tree vs HEAD)
       command: git status --porcelain --untracked-files=all -- resources/
       register: git_status
       changed_when: false
 
+    # Formato de cada linha do `git status --porcelain`: "XY caminho"
+    #   X = status no index, Y = status no working tree
+    #   exemplos: " M" (modificado), "??" (novo), " D" (deletado)
+    #
+    # changed_files = linhas sem "D" em X ou Y (adicionado/modificado)
+    # removed_files = linhas com "D" em X ou Y (deletado)
+    #
+    # regex_replace('^.{3}', '') descarta "XY " e deixa só o caminho
     - name: Separar arquivos alterados/novos dos removidos
       set_fact:
-        changed_files: >-
-          {%- set result = [] -%}
-          {%- for line in git_status.stdout_lines -%}
-            {%- if line[0:2] not in [' D', 'D ', 'D'] -%}
-              {%- set _ = result.append(line[3:]) -%}
-            {%- endif -%}
-          {%- endfor -%}
-          {{ result }}
-        removed_files: >-
-          {%- set result = [] -%}
-          {%- for line in git_status.stdout_lines -%}
-            {%- if line[0:2] in [' D', 'D ', 'D'] -%}
-              {%- set _ = result.append(line[3:]) -%}
-            {%- endif -%}
-          {%- endfor -%}
-          {{ result }}
+        changed_files: "{{ git_status.stdout_lines | reject('match', '^.?D') | map('regex_replace', '^.{3}', '') | list }}"
+        removed_files: "{{ git_status.stdout_lines | select('match', '^.?D') | map('regex_replace', '^.{3}', '') | list }}"
 
+    # resource_type = nome do arquivo sem o sufixo "_chave"
+    #   ex: storage_accounts_stpocansible001.yml -> storage_accounts
+    #   usado para escolher a task create_{{resource_type}}.yml no role azure
     - name: Deploy das instâncias alteradas/novas
       include_role:
         name: azure
@@ -41,6 +40,10 @@
       loop_control:
         label: "{{ item }}"
 
+    # O arquivo já não existe no working tree, então o conteúdo vem do
+    # último commit (`git show HEAD:path`) em vez de lookup('file', ...).
+    # stack_state: absent é repassado pro role, que usa como `state` no
+    # azure_rm_resourcegroup/azure_rm_deployment pra destruir o recurso.
     - name: Destroy das instâncias removidas
       include_role:
         name: azure
