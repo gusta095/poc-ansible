@@ -1,0 +1,6 @@
+rg-teste:
+    properties:
+        location: brazilsouth
+        tags:
+            env: test
+            project: poc-ansible

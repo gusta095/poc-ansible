@@ -5,6 +5,12 @@ resource_groups:
       tags:
         env: production
         project: poc-ansible
+  rg-teste:
+    properties:
+      location: brazilsouth
+      tags:
+        env: test
+        project: poc-ansible
 
 storage_accounts:
   stpocansible001:
