@@ -1,7 +1,0 @@
-resource_groups:
-  rg-producao:
-    properties:
-      location: brazilsouth
-      tags:
-        env: production
-        project: poc-ansible
