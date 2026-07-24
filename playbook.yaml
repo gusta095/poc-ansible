@@ -5,8 +5,11 @@
   gather_facts: false
 
   tasks:
-    # Compara working tree vs HEAD. Pipeline de CI usa
-    # `git diff HEAD~1 HEAD` (commit vs commit) — ver ideia-de-cicd.md.
+    # Uso local/dev: compara o working tree com o último commit (HEAD),
+    # então também pega mudanças ainda não commitadas.
+    #
+    # Ainda não existe pipeline de CI neste lab. Quando existir, a lógica
+    # muda pra `git diff HEAD~1 HEAD` (commit vs commit)
     - name: Detectar mudanças em resources/ (working tree vs HEAD)
       command: git status --porcelain --untracked-files=all -- resources/
       register: git_status
